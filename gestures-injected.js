@@ -2,9 +2,20 @@
 {
 	"use strict"; /* global chrome */
 
-	// buttons
-	const LEFT = 0;
-	const RIGHT = 2;
+	const on = (...args) => document.addEventListener(...args);
+	const off = (...args) => document.removeEventListener(...args);
+	const autobind = obj =>
+	{
+		Object
+			.getOwnPropertyNames(Object.getPrototypeOf(obj))
+			.filter(key => typeof obj[key] === 'function')
+			.forEach(key =>
+			{
+				obj[key] = obj[key].bind(obj);
+			});
+	};
+
+	const MOD_KEY = 'Control';
 	// misc
 	const SHIFT_MIN = 50;
 	// canvas
@@ -39,56 +50,69 @@
 		ext-gestures-arrow[ext-direction="up"]:before    { content: '↑'; }
 		ext-gestures-arrow[ext-direction="down"]:before  { content: '↓'; }
 		ext-gestures-arrow[ext-direction="right"]:before { content: '→'; }
-		ext-gestures-arrow[ext-direction="left"]:before { content: '←'; }
+		ext-gestures-arrow[ext-direction="left"]:before  { content: '←'; }
 	`;
 
 	const commands =
+	{
+		// close tab
+		down_right()
 		{
-			// close tab
-			'down-right'()
-			{
-				chrome.runtime.sendMessage({ action: 'close-current-tab' });
-			},
+			chrome.runtime.sendMessage({ action: 'close-current-tab' });
+		},
 
-			'left-up'()
-			{
-				chrome.runtime.sendMessage({ action: 'reopen-closed-tab' });
-			},
+		// ctrl+shift+T === reopen last closed tab
+		left_up()
+		{
+			chrome.runtime.sendMessage({ action: 'reopen-closed-tab' });
+		},
 
-			// reload tab
-			'down-up'(){ window.location.reload(); },
+		// reload tab
+		down_up()
+		{
+			window.location.reload();
+		},
 
-			// // open link in new tab
-			// 'down'(el)
-			// {
-			// 	while(el && el.tagName !== 'A')
-			// 		el = el.parentElement;
-			// 	if(!el || el.tagName !== 'A')
-			// 		return;
-
-			// 	const href = el.getAttribute('href');
-			// 	if(!href)
-			// 		return;
-
-			// 	window.open(href, '_blank');
-			// }
-		};
+		// // open link in new tab
+		down(el)
+		{
+			const link = el.closest('a');
+			const href = link && link.getAttribute('href');
+			if(href)
+				window.open(href, '_blank');
+		}
+	};
 
 	class MouseGestures
 	{
 		constructor(debug)
 		{
-			document.addEventListener('mousedown', e => { this._onMouseDown(e); }, false);
-			document.addEventListener('mouseup', e => { this._onMouseUp(e); }, false);
-			document.addEventListener('contextmenu', e => { this._onContext(e); }, false);
-			this._onMouseMove = this._onMouseMove.bind(this);
+			autobind(this);
+
+			this._inAction = false;
 			this._debug = debug;
 
-			this._addCSS();
+			on('keydown', this._onKeyDown);
+		}
+
+		_onKeyDown({ key })
+		{
+			if(!this._inAction && key === MOD_KEY)
+				this._start();
+		}
+
+		_onKeyUp({ key })
+		{
+			if(key === MOD_KEY)
+				this._stop();
 		}
 
 		_addCSS()
 		{
+			if(this._cssAdded)
+				return;
+
+			this._cssAdded = true;
 			setTimeout(() =>
 				{
 					const style = document.createElement('style');
@@ -98,62 +122,34 @@
 				}, 1);
 		}
 
-		_onMouseDown(e)
-		{
-			if(this._inAction)
-			{
-				this._stop();
-				return;
-			}
-
-			if(e.button === LEFT)
-				this._left = true;
-			else if(e.button === RIGHT && !this._left)
-			{
-				let el = e.target;
-				while(el && el.tagName !== 'IMG' && el.tagName !== 'A')
-					el = el.parentElement;
-				if(!el || (el.tagName !== 'IMG' && el.tagName !== 'A'))
-					this._start(e);
-			}
-		}
-
-		_onMouseUp(e)
-		{
-			if(e.button === LEFT)
-				this._left = false;
-			else if(e.button === RIGHT && this._inAction)
-				this._stop(e);
-		}
-
-		_onContext(e)
-		{
-			if(this._inAction)
-			{
-				if(!e.ctrlKey && !e.shiftKey && !e.altKey)
-					e.preventDefault();
-				else
-					this._stop();
-			}
-			this._log('_onContext');
-		}
-
-		_start(e)
+		_start()
 		{
 			this._inAction = true;
-			e.preventDefault();
-			document.addEventListener('mousemove', this._onMouseMove, false);
+
+			this._addCSS();
+
+			on('keyup', this._onKeyUp);
+			on('mousemove', this._onInitMouseMove, false);
+		}
+
+		_onInitMouseMove({ pageX, pageY, target })
+		{
+			off('mousemove', this._onInitMouseMove);
+			on('mousemove', this._onMouseMove, false);
 
 			this._moves = [];
 			this._move = null;
-			this._x = this._cx = e.pageX;
-			this._y = this._cy = e.pageY;
-			this._target = e.target;
+			this._x = this._cx = pageX;
+			this._y = this._cy = pageY;
+			this._target = target;
 
 			setTimeout(() =>
 				{
-					this._attachCanvas();
-					this._attachPanel();
+					if(this._inAction)
+					{
+						this._attachCanvas();
+						this._attachPanel();
+					}
 				}, 10);
 		}
 
@@ -185,7 +181,7 @@
 					left: 0,
 					width: document.body.clientWidth + 'px',
 					height: window.innerHeight + 'px',
-					position: 'absolute',
+					position: 'fixed',
 					zIndex: 99999,
 				});
 			Object.assign(this._canvas,
@@ -209,28 +205,39 @@
 			}
 		}
 
-		_stop(e)
+		_stop()
 		{
+			off('keyup', this._onKeyUp);
+			off('mousemove', this._onMouseMove, false);
+
+			this._inAction = false;
+
 			setTimeout(() =>
 				{
 					this._dettachCanvas();
 					this._dettachPanel();
 
+					const target = this._target;
+					this._target = null;
+
 					const cmd = commands[action];
 					if(cmd)
-						cmd(this._target);
-				}, CANVAS_DETTACH_DELAY);
+					{
+						this._log(`run cmd for ${action}`)
+						cmd(target);
+					}
+					else this._log(`unknown cmd: ${action}`);
+				},
+				CANVAS_DETTACH_DELAY);
 
-			document.removeEventListener('mousemove', this._onMouseMove, false);
-			this._inAction = false;
-
-			const action = this._moves.join('-');
+			const action = this._moves.join('_');
 			this._log(`stop: ${action}`);
 		}
 
 		_log(msg, ...args)
 		{
-			console.info(`MG: ${msg}`, ...args);
+			if(this._debug)
+				console.info(`MG: ${msg}`, ...args);
 		}
 
 		_onMouseMove(e)
@@ -252,8 +259,12 @@
 			if(Math.abs(dx) < SHIFT_MIN && Math.abs(dy) < SHIFT_MIN)
 				return;
 
-			const aX = dx >= SHIFT_MIN ? 1 : (Math.abs(dx) >= SHIFT_MIN ? -1 : 0);
-			const aY = dy >= SHIFT_MIN ? 1 : (Math.abs(dy) >= SHIFT_MIN ? -1 : 0);
+			const aX = dx >= SHIFT_MIN
+				? 1
+				: (Math.abs(dx) >= SHIFT_MIN ? -1 : 0);
+			const aY = dy >= SHIFT_MIN
+				? 1
+				: (Math.abs(dy) >= SHIFT_MIN ? -1 : 0);
 
 			this._x = e.pageX;
 			this._y = e.pageY;
@@ -282,5 +293,5 @@
 		}
 	}
 
-	window.mg = new MouseGestures(false);
+	window.mg = new MouseGestures(true);
 })();
