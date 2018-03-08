@@ -73,7 +73,7 @@
 			window.location.reload();
 		},
 
-		// // open link in new tab
+		// open link in new tab
 		down(el)
 		{
 			const link = el.closest('a');
@@ -81,6 +81,16 @@
 			if(href)
 				window.open(href, '_blank');
 		}
+	};
+
+	const isModeKey = evt =>
+	{
+		return evt.ctrlKey && evt.shiftKey && evt.altKey;
+	};
+
+	const isModeKeyOff = evt =>
+	{
+		return !evt.ctrlKey || !evt.shiftKey || !evt.altKey;
 	};
 
 	class MouseGestures
@@ -95,15 +105,15 @@
 			on('keydown', this._onKeyDown);
 		}
 
-		_onKeyDown({ key })
+		_onKeyDown(evt)
 		{
-			if(!this._inAction && key === MOD_KEY)
+			if(!this._inAction && isModeKey(evt))
 				this._start();
 		}
 
-		_onKeyUp({ key })
+		_onKeyUp(evt)
 		{
-			if(key === MOD_KEY)
+			if(isModeKeyOff(evt))
 				this._stop();
 		}
 
@@ -134,8 +144,7 @@
 
 		_onInitMouseMove({ pageX, pageY, target })
 		{
-			off('mousemove', this._onInitMouseMove);
-			on('mousemove', this._onMouseMove, false);
+			off('mousemove', this._onInitMouseMove, false);
 
 			this._moves = [];
 			this._move = null;
@@ -149,6 +158,7 @@
 					{
 						this._attachCanvas();
 						this._attachPanel();
+						on('mousemove', this._onMouseMove, false);
 					}
 				}, 10);
 		}
@@ -293,5 +303,5 @@
 		}
 	}
 
-	window.mg = new MouseGestures(true);
+	window.mg = new MouseGestures(false);
 })();
